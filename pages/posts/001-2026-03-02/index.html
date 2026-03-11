@@ -585,7 +585,7 @@ return 1;
             <span class="inline-highlight">Process Hacker</span> and across this
             notice
           </p>
-          <div class="image-container">
+          <div class="image-container-500-500 image-center">
             <img src="./img/process-hacker.png" alt="" class="zoomImage" />
           </div>
           <p>
@@ -662,15 +662,19 @@ if (!VirtualProtectEx(handle_process, remote_buffer, sizeof(shellcode), PAGE_REA
 };
 if (!WriteProcessMemory(handle_process, remote_buffer, shellcode, sizeof(shellcode), NULL)) return 0;</code></pre>
           <p>See the different below:</p>
+          <p>
+            The first two image shown the inject was successfully and shellcode
+            is existed in target process's memory
+          </p>
           <div class="image-container">
             <img src="./img/injected.png" alt="" class="zoomImage" />
           </div>
-          <div class="image-container">
+          <div class="image-container-500-500 image-center">
             <img src="./img/hex.png" alt="" class="zoomImage" />
           </div>
           <p>
-            Clear that memory when shellcode's task is done. Presented as gif
-            below
+            Now, clear that memory when shellcode's task is done. Result
+            presented as gif below
           </p>
           <div class="image-container">
             <img src="./img/result-2.gif" alt="" class="zoomImage" />
