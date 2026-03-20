@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="post-status" content="active" />
+    <title>DLL Injection P2</title>
+    <link rel="stylesheet" href="../../../assets/style.min.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="../../../assets/favicon/duck.jpg"
+      type="image/jpeg"
+    />
+    <link rel="apple-touch-icon" href="../../../assets/favicon/duck.jpg" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+  </head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/x86asm.min.js"></script>
+  <body>
+    <main class="container post-page" data-category="">
+      <a class="back-link" id="backLink" href="index.html">← Recent Posts</a>
+      <header class="post-header">
+        <h1 class="post-title">Hijacking & Side-loading and Proxing</h1>
+        <div class="post-meta">2026-03-18</div>
+      </header>
+      <article class="post-content">
+        <!-- fore word -->
+        <section>
+          <p>
+            <span class="title-highlight">Overview:</span>
+            Continuing from the previous blog post about
+            <a href="../012-2026-03-15/index.html" class="highlight"
+              >DLL injection</a
+            >, we have another technique to load DLLs into a process, exploiting
+
+            <span class="inline-highlight"
+              >Windows's search-order mechanism</span
+            >.
+          </p>
+
+          <p>This sample was created on the x64 architecture.</p>
+        </section>
+        <!-- outline -->
+        <!-- <section>
+          <ul>
+            <li>
+              <a href="#so" class="highlight">Exploring search order</a>
+            </li>
+          </ul>
+        </section> -->
+        <!-- search order -->
+        <section>
+          <p>
+            As we know that DLL is a Dynamic-link library. And can be loaded it
+            into the process by
+            <span class="inline-highlight">LoadLibrary(LPCSTR libName)</span>.
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">HMODULE kernel32_base = LoadLibraryA("kernel32.dll");</code></pre>
+          <p>
+            From above code snippet,
+            <span class="inline-highlight">kernel32_base</span> will hold the
+            base address of the loaded module. So, how does Windows locate that
+            DLL. This is mentioned in
+            <a
+              href="https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order"
+              class="highlight"
+            >
+              MSDN document </a
+            >as below:
+          </p>
+          <div class="image-container">
+            <img src="./img/so.png" alt=" " class="zoomImage" />
+          </div>
+          <p>
+            The Windows searches for the DLLs at load time by order. Of course
+            we will do some experiments. We try loading DLL. And use the
+            <span class="inline-highlight">Process Monitor</span> to see what
+            happened after we load a definitely existing DLL and non-existent
+            DLL.
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">int main() { HMODULE handle_module = LoadLibraryA("kernel32.dll"); }</code></pre>
+          <p>Pay attention to the path that Windows accesses for the search.</p>
+          <div class="image-container">
+            <img src="./img/module.png" alt=" " class="zoomImage" />
+          </div>
+          <p>Next we try loading a non-existent DLL to see what happend</p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">int main() { HMODULE handle_module = LoadLibraryA("non-existent.dll"); }</code></pre>
+          <div class="image-container">
+            <img src="./img/ex2.png" alt=" " class="zoomImage" />
+          </div>
+          <p>
+            From here we can see that the Windows search for the
+            <span class="inline-highlight">non-existent.dll</span> from many
+            different paths, begins with own's directory. By exploiting this
+            mechanism, we can cause an application to inadvertently load a
+            <span class="inline-highlight">malicious DLL</span>
+            .
+          </p>
+          <br />
+          <!-- Hijacking -->
+          <section>
+            <p>
+              To verify that, we will put the malicious DLL -
+              <span class="inline-highlight">payload.dll</span>, which we
+              created from previous post, into
+              <span class="inline-highlight">D:\python-main</span> then run the
+              <span class="inline-highlight">test.exe</span> to see if Windows
+              can find it.
+            </p>
+            <div class="image-container">
+              <img src="./img/hijacking.gif" alt=" " class="zoomImage" />
+            </div>
+            <div class="image-container">
+              <img src="./img/hijacking-img.png" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              The <span class="inline-highlight">payload.dll</span>
+              successfully loaded into the
+              <span class="inline-highlight">test.exe process</span>. Thiss is
+              the
+              <span class="title-highlight">DLL Hijacking.</span>
+            </p>
+          </section>
+          <!-- Side-loading -->
+          <section>
+            <p>
+              So let's assume that attacker overwrites one of DLLs of
+              <span class="inline-highlight">a valid application</span>. Will it
+              execute the attacker's DLL?
+            </p>
+            <p>
+              In this test, we will check for
+              <span class="inline-highlight">Mechvibes.exe</span> application,
+              which emulates sound of keyboard in this PC, and check which DLLs
+              it loads as order also.
+            </p>
+            <div class="image-container">
+              <img
+                src="./img/loadeddll-mechvibes.png"
+                alt=" "
+                class="zoomImage"
+              />
+            </div>
+            <p>
+              Here is the list of DLLs it loads, most of DLLs loaded from
+              <span class="inline-highlight">Window/System32</span>. And of
+              course many other applications use these DLLs as well. To avoid
+              breaking any functionality in Windows. We try rename and
+              overwrites the first DLL loaded in to the process located at D
+              disk,
+              <span class="inline-highlight">ffmpeg.dll</span>
+            </p>
+            <br />
+            <p>
+              We move <span class="inline-highlight">payload.dll</span> to
+              <span class="inline-highlight">Mechvibes folder</span>, make a
+              copy of <span class="inline-highlight">ffmpeg.dll</span> to
+              <span class="inline-highlight">ffmpeg-backup.dll</span> then we
+              change the name of
+              <span class="inline-highlight">payload.dll to ffmpeg.dll</span>,
+              finally execute
+              <span class="inline-highlight">Mechvibes.exe</span>. These steps
+              and result are presented in the gif as following:
+            </p>
+            <div class="image-container">
+              <img src="./img/result1.gif" alt=" " class="zoomImage" />
+            </div>
+            <div class="image-container">
+              <img src="./img/breakapp.png" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              <span class="inline-highlight">payload.dll</span>was successfully
+              loaded into the process. However it
+              <span class="inline-highlight">breaks the functionality</span> of
+              the application. Because the application may use the original DLL
+              to function normally but we overwrote it.
+            </p>
+          </section>
+          <!-- Proxing -->
+          <section>
+            <p>
+              So we need to explore what functions are inside the original DLL
+            </p>
+            <div class="image-container image-container-300-300 image-center">
+              <img src="./img/fmpeg.png" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              There are a lot of functions in this DLL. Our payload will play
+              role as a bridge, assume that our payload loaded in process, every
+              time the process calls to function, which does not exist in our
+              payload. Then our payload uses linker to redirect to the origin
+              DLL. To keep application functioning normally.
+            </p>
+            <pre
+              class="code-block"
+            ><code class="language-cpp">#define FORWARD_DLL "ffmpeg-backup"
+#pragma comment(linker, "/export:av_buffer_create=" FORWARD_DLL ".av_buffer_create")
+#pragma comment(linker, "/export:av_buffer_get_opaque=" FORWARD_DLL ".av_buffer_get_opaque")
+//... same with the rest of functions</code></pre>
+            <p>Result as following</p>
+            <div class="image-container">
+              <img src="./img/result-proxing.gif" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              <span class="inline-highlight">payload.dll</span> successfully
+              loaded into the process without beaking any functionality. This
+              called <span class="title-highlight">DLL Proxing</span>
+            </p>
+          </section>
+          <!-- Phantom -->
+          <section>
+            <p>
+              I also noticed that
+              <span class="inline-highlight">Mechvibes.exe</span> also loads
+              DLLs, which are not exist in its directory.
+            </p>
+            <p>Take a look at the picture below</p>
+            <div class="image-container">
+              <img src="./img/name-not-found.png" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              This means the application can still run normally without
+              overwriting any DLL. Now try rename the
+              <span class="inline-highlight">payload.dll</span> to one of these
+              <span class="inline-highlight">NAME NOT FOUND</span>. It could be
+              <span class="inline-highlight">profapi.dll</span> in this time.
+            </p>
+            <div class="image-container">
+              <img src="./img/result2.gif" alt=" " class="zoomImage" />
+            </div>
+            <p>
+              The result shows that
+              <span class="inline-highlight">payload.dll</span> successfully
+              loaded under the guise of a non-existent module without breaking
+              any functionality of the application. <br />
+              And will be
+              <span class="inline-highlight"
+                >reactivated every time the user opens this application</span
+              >
+              .<span class="inline-highlight">Payload.dll</span> is persistently
+              loaded.
+            </p>
+          </section>
+        </section>
+        <section>
+          <p>
+            In summary, all DLL injection techniques discussed in this post
+            <span class="inline-highlight"
+              >require the DLL to exist on disk</span
+            >. In next post, we will try to make POC of DLL Injection technique
+            called
+            <span class="inline-highlight">Reflective DLL Injection</span>
+          </p>
+        </section>
+      </article>
+      <div id="modal" class="modal">
+        <span id="closeModal" class="close-btn">&times;</span>
+      </div>
+    </main>
+    <script src="../../../assets/app.obf.js" defer></script>
+  </body>
+</html>

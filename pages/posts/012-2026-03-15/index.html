@@ -25,12 +25,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/x86asm.min.js"></script>
   <body>
     <main class="container post-page" data-category="">
-      <a class="back-link" id="backLink" href="index.html">← All Posts</a>
+      <a class="back-link" id="backLink" href="index.html">← Recent Posts</a>
       <header class="post-header">
-        <h1 class="post-title">DLL Injection Sample</h1>
+        <h1 class="post-title">Basic DLL Injection</h1>
         <div class="post-meta">2026-03-15</div>
       </header>
       <article class="post-content">
+        <!-- fore word -->
         <section>
           <p>
             <span class="title-highlight">Overview:</span>
@@ -283,8 +284,9 @@ p_CloseHandle = (CLOSEHANDLE)p_GetProcAddress((HMODULE)kernel32, s_CloseHandle);
         <section>
           <p>
             Lastly, with the flow we dicussed at beginning of this sample,
-            <span class="inline-hightlight">Injector</span> allocates memory
-            region in target process, then write the DLL path into it.
+            <span class="inline-highlight">Injector</span> allocates memory
+            region in target process, then write the
+            <span class="inline-highlight">DLL path</span> into it.
           </p>
           <pre class="code-block"><code class="language-cpp">// injector.c
 wchar_t dll_path[] = L"D:\\vs_c\\visus_dll\\x64\\Release\\payload.dll";
@@ -310,7 +312,7 @@ if (!p_WriteProcessMemory(handle_process, remote_buffer, dll_path, dll_size, NUL
             <span class="inline-highlight">thread entry</span>, pointing to
             <span class="inline-highlight">LoadLibrary</span> function. Then
             creates a thread with the entry we just created, whose content will
-            be the path to payload.dll.
+            be the path to <span class="inline-highlight">payload.dll</span>.
           </p>
           <pre class="code-block"><code class="language-cpp">// injector.c
 PTHREAD_START_ROUTINE execute_thread = (PTHREAD_START_ROUTINE)p_LoadLibraryW; // thread entry
@@ -330,18 +332,31 @@ p_CloseHandle(handle_process);</code></pre>
             <img src="./img/result1.gif" alt="" class="zoomImage" />
           </div>
           <p>
-            Check inside notepad process and we can see the dll was injected
-            successfully
+            Check inside notepad process and we can see
+            <span class="inline-highlight"
+              >the dll was injected successfully</span
+            >.
           </p>
           <div class="image-container">
             <img src="./img/result2.png" alt="" class="zoomImage" />
           </div>
           <p>
             In summary, this technique is somewhat similar to shellcode
-            injection, both forcing a process to perform a task. However, it's
-            quite noisy, it requires an injector to inject into the target, and
-            of course, traces are left behind in the target process's memory,
-            including in the list of DLLs.
+            injection, both
+            <span class="inline-highlight"
+              >forcing a process to perform a task</span
+            >. However, it's quite noisy, it
+            <span class="inline-highlight">requires an injector</span> to inject
+            into the target, and of course,
+            <span class="inline-highlight">DLL</span> must exist in target's
+            disk. Traces are left behind, in target process's memory, list of
+            DLLs...etc
+          </p>
+          <p>
+            Also, in the <span class="inline-highlight">Injector</span> we have
+            to place the
+            <span class="inline-highlight">ABSOLUTE DLL Path</span>. Guessing
+            the target's directory structure is also uncertain.
           </p>
         </section>
       </article>
