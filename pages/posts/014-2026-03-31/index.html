@@ -41,6 +41,20 @@
             >, we have another technique to load DLL into a process. By
             reflecting its bytes into target process's memory.
           </p>
+          <p>
+            References:
+            <a
+              href="https://www.ired.team/offensive-security/code-injection-process-injection/reflective-dll-injection"
+              class="highlight"
+              >IredTeam</a
+            >
+            and
+            <a
+              href="https://github.com/stephenfewer/ReflectiveDLLInjection/tree/master"
+              class="highlight"
+              >stephenfewer</a
+            >
+          </p>
 
           <p>This sample was created on the x64 architecture.</p>
         </section>
@@ -230,7 +244,7 @@ VirtualFreeEx(handle_process, remote_buf, 0, MEM_RELEASE);
             <img src="./img/thread-entry.png" alt="" class="zoomImage" />
           </div>
           <p>
-            Below is the full source code of
+            Below is <span class="highlight"> the full source code </span> of
             <span class="inline-highlight">The Loader</span> with some minor
             upgrade to dynamic inject
           </p>
@@ -597,7 +611,32 @@ return (DWORD_PTR)base_address; // Im trying to delete the execute memory but ju
           <div class="image-container">
             <img src="./img/result.gif" alt="" class="zoomImage" />
           </div>
-          <p>Full source code of payload (DLL)</p>
+          <p>
+            <span class="inline-highlight">Observe:</span> The memory region,
+            which created by
+            <span class="inline-highlight">The Loader</span> has been released.
+            Also, no suspicious DLL found in DLLs imported list.
+          </p>
+          <br />
+          <p>
+            One more thing, I am struggle to find some way to release the memory
+            region created by
+            <span class="inline-highlight">ReflectiveLoader</span> without
+            crashing the target process. I have tried to return the
+            <span class="inline-highlight">Image Base</span> to
+            <span class="inline-highlight">The Loader</span>, which created by
+            <span class="inline-highlight">ReflectiveLoader</span> but just only
+            8 low-bit returned and still miss 8 high-bit of target process.
+          </p>
+          <p class="highlight">Full source code of payload (DLL)</p>
+          <p>
+            Remember to build this DLL in
+            <span class="inline-highlight">realease mode</span> and dont forget
+            to set the <span class="inline-highlight">optimize off</span>
+          </p>
+          <pre
+            class="code-block"
+          ><code class="language-cpp">#pragma optimize("", off)</code></pre>
           <pre
             class="code-block code-block-drop"
           ><code class="language-cpp">#include "pch.h"
