@@ -631,12 +631,17 @@ return (DWORD_PTR)base_address; // Im trying to delete the execute memory but ju
           <p class="highlight">Full source code of payload (DLL)</p>
           <p>
             Remember to build this DLL in
-            <span class="inline-highlight">realease mode</span> and dont forget
+            <span class="inline-highlight">realease mode</span> and don't forget
             to set the <span class="inline-highlight">optimize off</span>
           </p>
           <pre
             class="code-block"
           ><code class="language-cpp">#pragma optimize("", off)</code></pre>
+          <p>
+            I will try to turn this DLL into
+            <span class="inline-highlight">"shellcode" type</span>. And update
+            to this post when it done.
+          </p>
           <pre
             class="code-block code-block-drop"
           ><code class="language-cpp">#include "pch.h"
