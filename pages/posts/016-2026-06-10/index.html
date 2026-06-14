@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="post-status" content="active" />
+    <title>API Hooking</title>
+    <link rel="stylesheet" href="../../../assets/style.min.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="../../../assets/favicon/duck.jpg"
+      type="image/jpeg"
+    />
+    <link rel="apple-touch-icon" href="../../../assets/favicon/duck.jpg" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+  </head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/x86asm.min.js"></script>
+  <body>
+    <main class="container post-page" data-category="">
+      <a class="back-link" id="backLink" href="index.html">← Recent Posts</a>
+      <header class="post-header">
+        <h1 class="post-title">API Hooking</h1>
+        <div class="post-meta">2026-06-10</div>
+      </header>
+      <article class="post-content">
+        <!-- fore word -->
+        <section>
+          <p>
+            <span class="title-highlight">Overview:</span> Today, we are going
+            to study about API Hooking. The main purpose of API Hooking and how
+            it works underhood.
+            <br />
+            This is one of the techniques used by many security solutions to
+            dertermine if code or its API params is malicious. So let get start.
+          </p>
+          <p>
+            References:
+            <a
+              href="https://www.ired.team/offensive-security/code-injection-process-injection/how-to-hook-windows-api-using-c++"
+              class="highlight"
+              >IredTeam</a
+            >
+          </p>
+          <p>This sample was created on the x64 architecture.</p>
+        </section>
+        <section>
+          <span class="title-highlight">How API was called</span>
+          <br />
+          So lets see the image below of simple to project calling to
+          <span class="inline-highlight">MessageBoxA</span>, the API from
+          <span class="inline-highlight">user32.dll</span>
+          <div class="image-container">
+            <img src="./img/1.png" alt="" class="zoomImage" />
+          </div>
+          <p>Debug this project with x64dbg</p>
+          <div class="image-container">
+            <img src="./img/2.png" alt="" class="zoomImage" />
+          </div>
+          <p>
+            From this image, we can see that in my project when I use
+            MessageBoxA API, it call to the instructions that performs
+            MessageBoxA and it keep calling to lower layer. I will have a post
+            about this later.
+          </p>
+          <p>So that's basically how API was called from the program</p>
+        </section>
+
+        <section>
+          <span class="title-highlight">Place a Hook in API?</span>
+        </section>
+      </article>
+      <div id="modal" class="modal">
+        <span id="closeModal" class="close-btn">&times;</span>
+      </div>
+    </main>
+    <script src="../../../assets/app.obf.js" defer></script>
+  </body>
+</html>
