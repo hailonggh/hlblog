@@ -1,0 +1,20 @@
+{
+  "Image container": {
+    "prefix": "..image",
+    "body": [
+      "<div class=\"image-container image-container-500-500 image-center\">",
+      "  <img src=\"\" alt=\"\" class=\"zoomImage\" />",
+      "</div>"
+    ],
+    "description": "Insert image container with empty src for post HTML"
+  },
+    "Code container": {
+    "prefix": "..code",
+    "body": [
+      "<div>",
+      "  <pre class=\"code-block\"><code class=\"language-cpp\"></code></pre>",
+      "</div>"
+    ],
+    "description": "Insert code container for post HTML"
+  }
+}
